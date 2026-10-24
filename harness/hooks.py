@@ -9,6 +9,7 @@ log = logging.getLogger("harness")
 
 class Hooks:
     """Observer bus. Events: llm_request, token, llm_response, tool_start, tool_end, error, final.
+    tool_start and tool_end carry the model's call id so parallel calls can be matched.
     Subscribe to "*" for everything. Hook failures never break the agent."""
 
     def __init__(self) -> None:

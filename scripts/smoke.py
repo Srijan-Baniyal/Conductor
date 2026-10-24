@@ -8,19 +8,22 @@ Optional: HARNESS_PROVIDER=anthropic, HARNESS_API_KEY / OPENAI_API_KEY / ANTHROP
 Exit codes: 0 all passed or skipped, 1 a scenario failed.
 """
 from __future__ import annotations
-import argparse, os, sys, tempfile
+import argparse, json, os, sys, tempfile
 from pathlib import Path
 
 from harness import Agent, Hooks, ToolRegistry
 from harness.cli import BUNDLED
 from harness.config import load_agent_config
-from harness.llm import AnthropicClient, OpenAICompatClient
+from harness.llm import make_client
 
 
-def build_llm(model: str, base: str | None, provider: str):
-    if provider == "anthropic":
-        return AnthropicClient(model, base)
-    return OpenAICompatClient(model, base)
+def norm(text: str) -> str:
+    """Models often write the Unicode minus sign. Treat it as a hyphen."""
+    return text.replace("\u2212", "-").replace("\u2013", "-")
+
+
+def build_llm(model: str, base: str | None, provider: str, extra: dict | None = None):
+    return make_client(provider, model, base, extra)
 
 
 def run_agent(name: str, llm, registry: ToolRegistry, root: str, prompts: list[str]) -> tuple[list[str], str]:
@@ -39,18 +42,19 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--model", default=os.getenv("HARNESS_MODEL"))
     p.add_argument("--base-url", default=os.getenv("HARNESS_BASE_URL"))
     p.add_argument("--provider", choices=["openai", "anthropic"], default=os.getenv("HARNESS_PROVIDER", "openai"))
+    p.add_argument("--extra-body", default=None, help='JSON merged into every request')
     p.add_argument("--runs", type=int, default=1, help="repeat each scenario to estimate a pass rate")
     a = p.parse_args(argv)
     if not a.model:
         print("SKIP: no model configured. Set HARNESS_MODEL (and HARNESS_BASE_URL for local or "
               "non-OpenAI endpoints) or pass --model to run the smoke test.")
         return 0
-    llm = build_llm(a.model, a.base_url, a.provider)
+    llm = build_llm(a.model, a.base_url, a.provider, json.loads(a.extra_body) if a.extra_body else None)
     registry = ToolRegistry()
     registry.load_builtin()
     scenarios = {
         "math": ("math", ["Solve x^2+5*x+6=0 using your tools and state the roots."],
-                 lambda c, f: "sympy_math" in c and "-3" in f and "-2" in f),
+                 lambda c, f: "sympy_math" in c and "-3" in norm(f) and "-2" in norm(f)),
         "lab": ("lab", ["Remember this: Experiment A uses 5g NaCl in 100ml water.",
                         "What does Experiment A use? Check your notes."],
                 lambda c, f: "add_note" in c and bool({"search_notes", "list_notes"} & set(c)) and "NaCl" in f),

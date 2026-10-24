@@ -1,20 +1,21 @@
 """Collect tool-calling training data by running a teacher model through the harness.
 
-    uv run scripts/collect_data.py --model minimax-m3:cloud --base-url http://localhost:11434/v1 \
-        --prompts data/prompts.jsonl --out data/train.jsonl
+    uv run --env-file .env scripts/collect_data.py --model thinkingmachines/Inkling-Small \
+        --base-url https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1 \
+        --prompts data/train_prompts.jsonl --out data/train.jsonl --workers 8
 
-Each line of the prompts file is {"agent": "math", "turns": ["user message", ...]}.
-A run is kept only if it called at least one tool, no tool returned an error, and it ended normally.
-Output lines are {"messages": [...], "tools": [...]} in OpenAI chat format, ready for
-scripts/finetune_tinker.py. Use --repeat to sample each prompt several times.
+Prompt distillation: pass --agents-dir examples/agents --suffix _pro to run the teacher with the long house-format
+prompt (math_pro.toml, lab_pro.toml). The saved examples swap in the stock agent's short system prompt, so the
+student learns the format without being told. A run is kept only if it is clean (finished normally, used a tool, no tool errors) and, when the scenario
+has checks, passes them. Output lines are {"messages": [...], "tools": [...]} in OpenAI chat format, ready for
+scripts/finetune_tinker.py. Make prompts with scripts/make_prompts.py.
 """
 from __future__ import annotations
-import argparse, json, os, sys, tempfile
+import argparse, json, os, sys
 from pathlib import Path
 
-from harness import Agent, ConversationMemory, Message, ToolRegistry
-from harness.cli import BUNDLED
-from harness.config import load_agent_config
+from harness import Message, ToolRegistry
+from harness.evaluation import BUNDLED, RunResult, check, is_clean, run_many, system_for
 
 
 def to_openai(system: str, messages: list[Message]) -> list[dict]:
@@ -31,26 +32,8 @@ def to_openai(system: str, messages: list[Message]) -> list[dict]:
     return out
 
 
-def is_good(messages: list[Message], stopped: str) -> bool:
-    tools = [m for m in messages if m.role == "tool"]
-    last = messages[-1] if messages else None
-    return bool(stopped == "done" and tools and not any(m.content.startswith("ERROR:") for m in tools)
-                and last and last.role == "assistant" and last.content.strip() and not last.tool_calls)
-
-
-def collect_one(entry: dict, llm, registry: ToolRegistry) -> dict | None:
-    cfg = load_agent_config(BUNDLED / f"{entry['agent']}.toml")
-    with tempfile.TemporaryDirectory() as tmp:
-        agent = Agent(cfg, llm, registry, root=tmp, memory=ConversationMemory(), approve=lambda t, a: True)
-        stopped = "done"
-        for turn in entry["turns"]:
-            stopped = agent.run(turn).stopped
-            if stopped != "done":
-                break
-        msgs = agent.memory.messages
-        if not is_good(msgs, stopped):
-            return None
-        return {"messages": to_openai(agent._system(), msgs), "tools": agent.registry.schemas()}
+def to_example(res: RunResult, system: str | None = None) -> dict:
+    return {"messages": to_openai(system or res.system, res.messages), "tools": res.tools}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -58,34 +41,47 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--model", default=os.getenv("HARNESS_MODEL"))
     p.add_argument("--base-url", default=os.getenv("HARNESS_BASE_URL"))
     p.add_argument("--provider", choices=["openai", "anthropic"], default=os.getenv("HARNESS_PROVIDER", "openai"))
-    p.add_argument("--prompts", default="data/prompts.jsonl")
+    p.add_argument("--prompts", default="data/train_prompts.jsonl")
     p.add_argument("--out", default="data/train.jsonl")
     p.add_argument("--repeat", type=int, default=1, help="samples per prompt")
+    p.add_argument("--temperature", type=float, default=0.3, help="above 0 so repeats differ")
+    p.add_argument("--extra-body", default=None, help='JSON merged into every request, e.g. \'{"reasoning_effort": "none"}\'')
+    p.add_argument("--workers", type=int, default=4)
+    p.add_argument("--agents-dir", default=str(BUNDLED), help="folder with the teacher agent files")
+    p.add_argument("--suffix", default="", help='teacher agent file suffix, e.g. "_pro"')
     a = p.parse_args(argv)
     if not a.model:
         print("SKIP: set --model or HARNESS_MODEL to the teacher model.")
         return 0
 
-    from harness.llm import AnthropicClient, OpenAICompatClient
-    llm = AnthropicClient(a.model, a.base_url) if a.provider == "anthropic" else OpenAICompatClient(a.model, a.base_url)
+    from harness.llm import make_client
+    llm = make_client(a.provider, a.model, a.base_url, json.loads(a.extra_body) if a.extra_body else None)
     registry = ToolRegistry()
     registry.load_builtin()
     entries = [json.loads(line) for line in Path(a.prompts).read_text().splitlines() if line.strip()]
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
-    kept = total = 0
+    kept, dropped = 0, {"error": 0, "unclean": 0, "failed check": 0}
+
+    def progress(i, n, item):
+        if i % 10 == 0 or i == n:
+            print(f"  {i}/{n} runs", flush=True)
+
     with open(a.out, "w", encoding="utf-8") as f:
-        for entry in entries:
-            for _ in range(a.repeat):
-                total += 1
-                try:
-                    ex = collect_one(entry, llm, registry)
-                except Exception as e:
-                    print(f"  error on {entry['turns'][0]!r}: {e}", file=sys.stderr)
-                    ex = None
-                if ex:
-                    f.write(json.dumps(ex) + "\n")
-                    kept += 1
-    print(f"kept {kept} of {total} runs -> {a.out}")
+        for entry, res, err in run_many(entries, llm, registry, a.workers, a.repeat, a.temperature, progress,
+                                      Path(a.agents_dir), a.suffix):
+            if res is None:
+                dropped["error"] += 1
+                print(f"  error on {entry['turns'][0]!r}: {err}", file=sys.stderr)
+            elif not is_clean(res, entry):
+                dropped["unclean"] += 1
+            elif not check(entry, res)[0]:
+                dropped["failed check"] += 1
+            else:
+                student = system_for(entry["agent"]) if a.suffix else None
+                f.write(json.dumps(to_example(res, student)) + "\n")
+                f.flush()
+                kept += 1
+    print(f"kept {kept} runs -> {a.out}; dropped {dropped}")
     return 0 if kept else 1
 
 

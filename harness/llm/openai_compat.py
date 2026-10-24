@@ -7,6 +7,8 @@ from ..types import Message, LLMResponse, ToolCall
 from ._http import RETRY_CODES, open_with_retry  # noqa: F401 (RETRY_CODES kept for compatibility)
 from .base import LLMError
 
+USER_AGENT = "universal-agent-harness/0.1"
+
 
 def _make_call(i: int, call_id: str | None, name: str, raw: str | None) -> ToolCall:
     raw = raw or "{}"
@@ -54,8 +56,8 @@ class OpenAICompatClient:
             body["stream"] = True
             body["stream_options"] = {"include_usage": True}
         return urllib.request.Request(f"{self.base_url}/chat/completions", data=json.dumps(body).encode(),
-                                      headers={"Content-Type": "application/json",
-                                               "Authorization": f"Bearer {self.api_key}"})
+                                      headers={"Content-Type": "application/json", "User-Agent": USER_AGENT,
+                                               "Authorization": "Bearer " + self.api_key})
 
     def chat(self, messages, tools=None, temperature=0.0) -> LLMResponse:
         req = self._request(messages, tools, temperature, False)

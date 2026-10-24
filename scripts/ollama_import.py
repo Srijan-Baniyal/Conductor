@@ -1,8 +1,8 @@
 """Import a merged HuggingFace model directory into Ollama, reusing the base model's template.
 
-    uv run scripts/ollama_import.py --model-dir build/tuned/merged --name harness-qwen3 --base qwen3:8b
+    uv run scripts/ollama_import.py --model-dir build/tuned/merged --name harness-qwen35 --base qwen3.5:4b
 
-Then test it with: HARNESS_MODEL=harness-qwen3 HARNESS_BASE_URL=http://localhost:11434/v1 uv run scripts/smoke.py
+Then test it with: HARNESS_MODEL=harness-qwen35 HARNESS_BASE_URL=http://localhost:11434/v1 uv run scripts/smoke.py
 """
 from __future__ import annotations
 import argparse, subprocess, sys
@@ -24,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--model-dir", required=True)
     p.add_argument("--name", required=True, help="name for the new Ollama model")
-    p.add_argument("--base", default="qwen3:8b", help="Ollama model whose template to reuse")
+    p.add_argument("--base", default="qwen3.5:4b", help="Ollama model whose template to reuse")
     p.add_argument("--quantize", default="q4_K_M", help="quantization passed to ollama create, '' to skip")
     a = p.parse_args(argv)
     model_dir = Path(a.model_dir)

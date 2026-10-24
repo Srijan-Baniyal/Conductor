@@ -80,6 +80,7 @@ def test_openai_success(fake):
     r = OpenAICompatClient("m", f.url, api_key="k").chat([Message("user", "hi")], TOOLS, 0.3)
     assert r.content == "hello" and r.usage == {"total_tokens": 7}
     req = f.requests[0]
+    assert req["headers"]["user-agent"].startswith("universal-agent-harness/")
     assert req["path"] == "/chat/completions" and req["headers"]["authorization"] == "Bearer k"
     assert req["body"]["model"] == "m" and req["body"]["tools"] == TOOLS and req["body"]["temperature"] == 0.3
 
@@ -244,7 +245,7 @@ def test_agent_emits_token_events_and_falls_back(fake, tmp_path):
     hooks2.on("token", lambda e, d: tokens2.append(d))
     agent2 = Agent(AgentConfig("t", "sys"), ScriptedLLM([LLMResponse("plain")]), ToolRegistry(), root=tmp_path / "b",
                    hooks=hooks2, stream=True)
-    assert agent2.run("hi").final == "plain" and tokens2 == []
+    assert agent2.run("hi").final == "plain" and [item["text"] for item in tokens2] == ["plain"]
 
 
 def test_cli_stream_and_provider(fake, tmp_path, capsys):
@@ -327,7 +328,7 @@ def test_collect_data_keeps_only_clean_tool_runs(fake, tmp_path):
     prompts = tmp_path / "p.jsonl"
     prompts.write_text("\n".join(json.dumps({"agent": "math", "turns": [t]}) for t in ["a", "b", "c"]))
     out = tmp_path / "train.jsonl"
-    assert collect.main(["--model", "m", "--base-url", f.url, "--prompts", str(prompts), "--out", str(out)]) == 0
+    assert collect.main(["--model", "m", "--base-url", f.url, "--prompts", str(prompts), "--out", str(out), "--workers", "1"]) == 0
     rows = [json.loads(line) for line in out.read_text().splitlines()]
     assert len(rows) == 1
     roles = [m["role"] for m in rows[0]["messages"]]
@@ -336,21 +337,35 @@ def test_collect_data_keeps_only_clean_tool_runs(fake, tmp_path):
     assert rows[0]["tools"][0]["function"]["name"] == "sympy_math"
 
 
-def test_qwen_flatten_uses_native_tool_format():
+_FLAT_EX = {"tools": [{"type": "function", "function": {"name": "add", "description": "d", "parameters": {}}}],
+            "messages": [{"role": "system", "content": "sys"}, {"role": "user", "content": "go"},
+                         {"role": "assistant", "content": "", "tool_calls": [
+                             {"id": "1", "type": "function", "function": {"name": "add", "arguments": '{"a": 1, "b": [2]}'}},
+                             {"id": "2", "type": "function", "function": {"name": "add", "arguments": '{"a": 2}'}}]},
+                         {"role": "tool", "tool_call_id": "1", "content": "2"},
+                         {"role": "tool", "tool_call_id": "2", "content": "3"},
+                         {"role": "assistant", "content": "answer"}]}
+
+
+def test_qwen35_flatten_matches_hf_template():
     ft = _load_script("finetune_tinker")
-    ex = {"tools": [{"type": "function", "function": {"name": "add", "description": "d", "parameters": {}}}],
-          "messages": [{"role": "system", "content": "sys"}, {"role": "user", "content": "go"},
-                       {"role": "assistant", "content": "", "tool_calls": [
-                           {"id": "1", "type": "function", "function": {"name": "add", "arguments": '{"a": 1}'}},
-                           {"id": "2", "type": "function", "function": {"name": "add", "arguments": '{"a": 2}'}}]},
-                       {"role": "tool", "tool_call_id": "1", "content": "2"},
-                       {"role": "tool", "tool_call_id": "2", "content": "3"},
-                       {"role": "assistant", "content": "answer"}]}
-    out = ft.to_qwen_messages(ex)
+    assert ft.default_tool_format("Qwen/Qwen3.5-4B") == "qwen35_xml"
+    assert ft.default_tool_format("Qwen/Qwen3-8B") == "qwen3_json"
+    out = ft.to_qwen_messages(_FLAT_EX, "qwen35_xml")
     assert [m["role"] for m in out] == ["system", "user", "assistant", "user", "assistant"]
-    assert "<tools>" in out[0]["content"] and '"name": "add"' in out[0]["content"]
-    assert out[2]["content"].count("<tool_call>") == 2 and '"arguments": {"a": 1}' in out[2]["content"]
+    assert out[0]["content"].startswith("# Tools\n\nYou have access to the following functions:\n\n<tools>\n{")
+    assert out[0]["content"].endswith("</IMPORTANT>\n\nsys")
+    assert out[2]["content"] == ("<tool_call>\n<function=add>\n<parameter=a>\n1\n</parameter>\n"
+                                 "<parameter=b>\n[2]\n</parameter>\n</function>\n</tool_call>\n"
+                                 "<tool_call>\n<function=add>\n<parameter=a>\n2\n</parameter>\n</function>\n</tool_call>")
     assert out[3]["content"] == "<tool_response>\n2\n</tool_response>\n<tool_response>\n3\n</tool_response>"
+
+
+def test_qwen3_json_flatten():
+    ft = _load_script("finetune_tinker")
+    out = ft.to_qwen_messages(_FLAT_EX, "qwen3_json")
+    assert "<tools>" in out[0]["content"] and '"name": "add"' in out[0]["content"]
+    assert out[2]["content"].count("<tool_call>") == 2 and '"arguments": {"a": 1, "b": [2]}' in out[2]["content"]
 
 
 def test_finetune_skips_without_key_and_ollama_modelfile(monkeypatch, capsys, tmp_path):

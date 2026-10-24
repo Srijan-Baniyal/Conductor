@@ -61,6 +61,7 @@ class AnthropicClient:
             body["tools"] = self._tools(tools)
         req = urllib.request.Request(f"{self.base_url}/v1/messages", data=json.dumps(body).encode(),
                                      headers={"Content-Type": "application/json", "x-api-key": self.api_key,
+                                              "User-Agent": "universal-agent-harness/0.1",
                                               "anthropic-version": self.version})
         with open_with_retry(req, self.timeout, self.max_retries) as r:
             try:

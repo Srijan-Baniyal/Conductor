@@ -1,6 +1,6 @@
 from __future__ import annotations
 import concurrent.futures as cf
-import json, time, uuid
+import json, re, time, uuid
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -119,9 +119,9 @@ class Agent:
             return ToolResult(False, f"Unknown tool '{call.name}'. Available: {', '.join(self.registry.names()) or 'none'}")
         if t.requires_approval and not (self.approve and self.approve(t, call.arguments)):
             return ToolResult(False, "The user denied this tool call.")
-        self.hooks.emit("tool_start", name=call.name, arguments=call.arguments)
+        self.hooks.emit("tool_start", id=call.id, name=call.name, arguments=call.arguments)
         res = t.run(call.arguments, self.ctx)
-        self.hooks.emit("tool_end", name=call.name, ok=res.ok, ms=round(res.ms, 1), output=res.output[:500])
+        self.hooks.emit("tool_end", id=call.id, name=call.name, ok=res.ok, ms=round(res.ms, 1), output=res.output[:2000])
         return res
 
     def _run_tools(self, calls: list[ToolCall], seen: Counter) -> list[ToolResult]:
@@ -151,10 +151,13 @@ class Agent:
         t0 = time.perf_counter()
         if self.stream and hasattr(self.llm, "stream"):
             resp = self._stream(messages, tools, step)
+        elif self.stream:
+            resp = self._stream_chat(messages, tools, step)
         else:
             resp = self.llm.chat(messages, tools, self.cfg.temperature)
         self.hooks.emit("llm_response", step=step, ms=round((time.perf_counter() - t0) * 1000),
-                        tool_calls=[c.name for c in resp.tool_calls], usage=resp.usage, text=resp.content[:500])
+                        tool_calls=[c.name for c in resp.tool_calls], usage=resp.usage, text=resp.content[:2000],
+                        calls=[{"id": c.id, "name": c.name, "arguments": c.arguments} for c in resp.tool_calls])
         return resp
 
     def _stream(self, messages: list[Message], tools: list[dict] | None, step: int) -> LLMResponse:
@@ -168,6 +171,13 @@ class Agent:
             parts.append(delta)
             self.hooks.emit("token", step=step, text=delta)
         return final if isinstance(final, LLMResponse) else LLMResponse("".join(parts))
+
+    def _stream_chat(self, messages: list[Message], tools: list[dict] | None, step: int) -> LLMResponse:
+        """Keep the live UI progressive for providers that only implement chat()."""
+        response = self.llm.chat(messages, tools, self.cfg.temperature)
+        for delta in re.findall(r"\S+\s*", response.content):
+            self.hooks.emit("token", step=step, text=delta)
+        return response
 
     def run(self, user_input: str) -> AgentResult:
         self.memory.add(Message("user", user_input))

@@ -1,10 +1,10 @@
 from __future__ import annotations
-import argparse, os, sys
+import argparse, json, os, sys
 from pathlib import Path
 from .agent import Agent, llm_summarizer
 from .config import discover, load_agent_config
 from .hooks import Hooks, JsonlTracer
-from .llm import AnthropicClient, MockLLM, OpenAICompatClient
+from .llm import MockLLM, make_client
 from .memory import ConversationMemory
 from .tools.registry import ToolRegistry
 
@@ -16,6 +16,26 @@ def _approve(tool, args) -> bool:
     return input(f"  allow {tool.name}({args})? [y/N] ").strip().lower() == "y"
 
 
+def _serve(a: argparse.Namespace, registry: ToolRegistry, agents: dict) -> int:
+    from .server import App, ModelPreset, serve
+    presets = []
+    if a.model:
+        presets.append(ModelPreset("default", a.model, a.provider, a.model, a.base_url,
+                                   json.loads(a.extra_body) if a.extra_body else {}))
+    if a.models_file:
+        presets += [ModelPreset(**row) for row in json.loads(Path(a.models_file).read_text())]
+    if not presets:
+        presets.append(ModelPreset("mock", "Offline demo model", "mock"))
+    app = App(Path(a.root), [BUNDLED, *map(Path, a.agents_dir)], registry, presets, a.cors_origin, a.yes)
+    srv = serve(app, a.host, a.port)
+    print(f"harness API on http://{a.host}:{a.port}  models: {', '.join(p.id for p in presets)}  (Ctrl+C to stop)")
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        print()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="harness", description="Universal Agent Harness")
     p.add_argument("--agent", "--mode", default="general", help="agent name or path to a .toml file")
@@ -25,6 +45,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--provider", choices=["openai", "anthropic"], default=os.getenv("HARNESS_PROVIDER", "openai"),
                    help="openai (any OpenAI-compatible endpoint) or anthropic (native Messages API)")
     p.add_argument("--base-url", default=None, help="endpoint override, e.g. http://localhost:11434/v1")
+    p.add_argument("--extra-body", default=None,
+                   help='JSON merged into every request, e.g. \'{"reasoning_effort": "none"}\'')
     p.add_argument("--stream", action="store_true", help="print tokens as they arrive (if the client supports it)")
     p.add_argument("--mock", action="store_true", help="offline demo model, no API key")
     p.add_argument("--session", default=None, help="session id; reuse to resume")
@@ -33,6 +55,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--summarize", action="store_true", help="LLM-summarize history that leaves the window")
     p.add_argument("-y", "--yes", action="store_true", help="auto-approve tools that require approval")
     p.add_argument("-p", "--prompt", help="run one prompt and exit")
+    p.add_argument("--serve", action="store_true", help="start the HTTP API for the web UI instead of a REPL")
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--models-file", help='JSON list of model presets for the UI: [{"id","label","provider","model","base_url","extra_body"}]')
+    p.add_argument("--cors-origin", default="http://localhost:3000", help="origin allowed to call the API")
     a = p.parse_args(argv)
 
     registry = ToolRegistry()
@@ -42,10 +69,13 @@ def main(argv: list[str] | None = None) -> int:
         registry.load_dir(d)
     agents = discover(BUNDLED, *a.agents_dir)
 
+    if a.serve:
+        return _serve(a, registry, agents)
+
     if a.mock:
         llm = MockLLM()
     elif a.model:
-        llm = AnthropicClient(a.model, a.base_url) if a.provider == "anthropic" else OpenAICompatClient(a.model, a.base_url)
+        llm = make_client(a.provider, a.model, a.base_url, json.loads(a.extra_body) if a.extra_body else None)
     else:
         p.error("set --model (or HARNESS_MODEL), or use --mock")
 
