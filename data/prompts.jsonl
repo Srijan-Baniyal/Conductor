@@ -1,0 +1,36 @@
+{"agent": "math", "turns": ["Solve x^2+5*x+6=0"]}
+{"agent": "math", "turns": ["Solve 2*x^2-8=0"]}
+{"agent": "math", "turns": ["Solve x^3-6*x^2+11*x-6=0"]}
+{"agent": "math", "turns": ["Solve 3*x+7=22"]}
+{"agent": "math", "turns": ["Solve x^2+x+1=0"]}
+{"agent": "math", "turns": ["Factor x^2-5*x+6"]}
+{"agent": "math", "turns": ["Factor x^3-x"]}
+{"agent": "math", "turns": ["Expand (x+2)^3"]}
+{"agent": "math", "turns": ["Expand (2*x-1)*(x+4)"]}
+{"agent": "math", "turns": ["Simplify (x^2-1)/(x-1)"]}
+{"agent": "math", "turns": ["Differentiate x^3*sin(x)"]}
+{"agent": "math", "turns": ["Differentiate exp(2*x)/x"]}
+{"agent": "math", "turns": ["What is the derivative of ln(x^2+1)?"]}
+{"agent": "math", "turns": ["Integrate x^2 from 0 to 3"]}
+{"agent": "math", "turns": ["Integrate sin(x) from 0 to pi"]}
+{"agent": "math", "turns": ["Integrate 1/x from 1 to e"]}
+{"agent": "math", "turns": ["Find the antiderivative of x*exp(x)"]}
+{"agent": "math", "turns": ["Evaluate sqrt(2)*sqrt(8)"]}
+{"agent": "math", "turns": ["Evaluate sin(pi/6)+cos(pi/3)"]}
+{"agent": "math", "turns": ["Evaluate 12345*6789"]}
+{"agent": "math", "turns": ["Plot sin(x) from -6 to 6"]}
+{"agent": "math", "turns": ["Plot y = x^2 - 4 from -5 to 5"]}
+{"agent": "math", "turns": ["Plot cos(x)*exp(-x/5) from 0 to 20"]}
+{"agent": "math", "turns": ["Plot a bar chart of [3, 7, 2, 9]"]}
+{"agent": "math", "turns": ["Plot a line chart of y = [1, 4, 9, 16, 25]"]}
+{"agent": "math", "turns": ["Plot a scatter of x=[1,2,3,4] and y=[2,4,5,8]"]}
+{"agent": "lab", "turns": ["Remember: Experiment A uses 5g NaCl in 100ml water.", "What does Experiment A use?"]}
+{"agent": "lab", "turns": ["Remember: Experiment B was run at 37 degrees C for 2 hours.", "How long and how hot was Experiment B?"]}
+{"agent": "lab", "turns": ["Save this note: sample 7 turned cloudy after adding 2ml HCl.", "What happened to sample 7?"]}
+{"agent": "lab", "turns": ["Remember: Titration run 3 ended at 24.6 ml of NaOH.", "Recall the result of titration run 3."]}
+{"agent": "lab", "turns": ["Remember: Experiment C control group used distilled water only.", "Remember: Experiment C test group used 3g sucrose per litre.", "Summarize all my notes."]}
+{"agent": "lab", "turns": ["Note: centrifuge speed for protocol P1 is 4000 rpm for 10 minutes.", "What are the settings for protocol P1?"]}
+{"agent": "lab", "turns": ["Remember: pH of buffer X was 7.4 at 25 C.", "What was the pH of buffer X?"]}
+{"agent": "lab", "turns": ["Remember: Experiment D yielded 2.3g of product from 5g of reactant.", "What was the yield of Experiment D, as a percentage?"]}
+{"agent": "lab", "turns": ["Remember: Plant tray 1 grew 4 cm in week one.", "Remember: Plant tray 1 grew 6 cm in week two.", "Plot the weekly growth of plant tray 1 as a bar chart, then list my notes."]}
+{"agent": "lab", "turns": ["List my notes."]}

@@ -1,0 +1,3 @@
+description = "General chat assistant, no tools."
+system_prompt = "You are a helpful, concise general-purpose assistant."
+tools = []

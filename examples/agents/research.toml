@@ -1,0 +1,9 @@
+description = "Looks things up and keeps notes."
+system_prompt = "You are a careful research assistant."
+tools = ["search_notes", "add_note", "unit_convert"]
+max_steps = 8
+temperature = 0.2
+
+[memory]
+max_context_tokens = 6000
+notes_scope = "global"
